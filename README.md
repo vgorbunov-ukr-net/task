@@ -1,4 +1,6 @@
 # task
+(Checked on Virtual Box 1 CPU Ubuntu 64)
+
 How to start:
 
 1)sudo ./ipd
