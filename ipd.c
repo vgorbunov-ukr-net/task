@@ -15,29 +15,23 @@
 #include <net/if.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-
 #include <sys/types.h>
 #include <ifaddrs.h>
-
 #include <netdb.h>
 #include <linux/if_link.h>
-
 #include <netinet/ether.h>
 #include <netinet/ip.h>
-
 #include <fcntl.h>
 #include <sys/stat.h>
-
 #include <sys/ipc.h>
 #include <sys/shm.h>
-
 #include <string.h>
 #include <errno.h>
 #include <string.h>
+#include <sys/sem.h>
+#include "common.h"
 
 
-#define SHM_COM_KEY 0x1234
-#define SHM_DAT_KEY 0x4321
 
 #define NOP   0
 #define START 1
@@ -324,6 +318,29 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
+#ifdef SEMAPHORES
+	/* semaphores initialization*/
+	int semid;
+	union semun{
+		int val;
+		struct semid_ds *buf;
+		unsigned short *array;
+		struct seminfo *__buff;
+	};
+	union semun arg;
+	struct sembuf lock_shmem_com = {0,-1,0};
+	struct sembuf rel_shmem_com = {0,1,0};
+
+    semid=semget(SEM_KEY,2,0666|IPC_CREAT);
+
+    /*set up in semaphore 0 value 1*/
+    arg.val=1;
+    semctl(semid,0,SETVAL,arg);
+    semctl(semid,1,SETVAL,arg);
+#endif
+    const unsigned int size_com=50;
+    char str[size_com];
+
 	unsigned int flag_to_sniff = 0u;
 
 	com *command_to_exec = command_make(); //to store and execute received command
@@ -370,6 +387,9 @@ int main(int argc, char** argv)
 	/*
 	* decode the command received from shared memory
 	*/
+#ifdef SEMAPHORES
+		    semop(semid, &lock_shmem_com,1);
+#endif
 		if (shmp_command[0] != '*' && shmp_command[0] != 0) {/*if command is not yet read, not erased by '*' and not empty*/
 			str_command = shmp_command;
 			command_to_exec = command_decoder(str_command, command_to_exec);
@@ -380,8 +400,9 @@ int main(int argc, char** argv)
 			*shmp_command = 0;
 			shmp_command--;
 		}
-
-
+#ifdef SEMAPHORES
+		    semop(semid, &rel_shmem_com,1);
+#endif
 
 	/*
 	 * handle decoded commands
@@ -446,9 +467,9 @@ if (shmctl(shmid_data, IPC_RMID, 0) == -1) {
 	perror("Removing Shared Memory Data");
 	return 1;
 }
-
-
-
+#ifdef SEMAPHORES
+semctl(semid, 0, IPC_RMID);
+#endif
   /*
    * store IP data in .csv file
    * IP,count

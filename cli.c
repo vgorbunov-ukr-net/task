@@ -9,19 +9,16 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/types.h>
+#include <string.h>
+#include <errno.h>
+#include <stdlib.h>
+#include <sys/sem.h>
+#include "common.h"
 
 
-
-#include<sys/ipc.h>
-#include<sys/shm.h>
-#include<sys/types.h>
-#include<string.h>
-#include<errno.h>
-#include<stdlib.h>
-
-
-
-#define BUF_LENGTH 1024
 
 
 typedef union {
@@ -56,10 +53,6 @@ void print_help(void)
 	printf("\t exitcli (exit for cli)\n");
 }
 
-
-#define BUF_SIZE 1024
-#define SHM_COM_KEY 0x1234
-#define SHM_DAT_KEY 0x4321
 
 
 
@@ -97,12 +90,27 @@ int main()
 		perror("shmp_data");
 		return 1;
 	}
+#ifdef SEMAPHORES
+	int semid;
+	union semun{
+		int val;
+		struct semid_ds *buf;
+		unsigned short *array;
+		struct seminfo *__buff;
+	};
+	union semun arg;
+	struct sembuf lock_shmem_com = {0,-1,0};
+	struct sembuf rel_shmem_com = {0,1,0};
 
-const unsigned int size_com=50;
-char str[size_com];
+    semid=semget(SEM_KEY,2,0666);
 
-
-
+    /*set up in semaphore 0 value 1*/
+    arg.val=1;
+    semctl(semid,0,SETVAL,arg);
+    semctl(semid,1,SETVAL,arg);
+#endif
+    const unsigned int size_com=50;
+    char str[size_com];
 
 
 
@@ -120,18 +128,45 @@ while (!strstr(str, "exitcli"))
 
     if(strstr(str,"--help"))
 	print_help();
-
+#ifdef SEMAPHORES
+    semop(semid, &lock_shmem_com,1);
+#endif
 	for(unsigned int i=0;i<size_com;i++)
 		command[i]=str[i];
 	int command_length = strlen(command);
      /* add 0 at the end of string */
 	command += command_length;
 	*command = 0;
-     /* wait for acknowledge '*' */
-	while(*shmp_command!='*'){
-		//printf("waiting for command..\n");
-		sleep(1);
+#ifdef SEMAPHORES
+	semop(semid, &rel_shmem_com,1);
+#endif
+	usleep(50000);//50ms delay - give some time for daemon to react on command
+
+	while(1){
+
+		usleep(50000);//50ms
+#ifdef SEMAPHORES
+		semop(semid, &lock_shmem_com,1);
+#endif
+		if(*shmp_command=='*'){
+#ifdef SEMAPHORES
+			semop(semid, &rel_shmem_com,1);
+#endif
+			break;
+		}
+#ifdef SEMAPHORES
+		else
+			semop(semid, &rel_shmem_com,1);
+#endif
 	}
+
+
+///*without semaphores*/
+//     /* wait for acknowledge '*' */
+//	while(*shmp_command!='*'){
+//		//printf("waiting for command..\n");
+//		sleep(1);
+//	}
 
 
 	/*
